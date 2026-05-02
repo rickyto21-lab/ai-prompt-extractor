@@ -1,60 +1,43 @@
 import streamlit as st
-from openai import OpenAI
+import google.generativeai as genai
 import requests
 from bs4 import BeautifulSoup
 
-# === 改成這樣！從 st.secrets 讀取，不再把 Key 寫死在這裡 ===
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-NOTION_API_KEY = st.secrets["NOTION_API_KEY"]
-NOTION_DB_ID = st.secrets["NOTION_DB_ID"]
+# === 1. 從密碼本讀取 Gemini 金鑰 ===
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+NOTION_API_KEY = st.secrets.get("NOTION_API_KEY", "")
+NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "")
 
-# 初始化 OpenAI
-client = OpenAI(api_key=OPENAI_API_KEY)
+# === 2. 初始化 Gemini 模型 ===
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# ... (下面的程式碼完全不用動) ...
-
-# 初始化 OpenAI (解決 choices 報錯的問題)
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# 設定網頁標題 (解決 st is not defined 的問題)
 st.set_page_config(page_title="AI Prompt 提取神器", page_icon="🚀")
-st.title("🚀 自動提取網頁 Prompt & 圖文")
+st.title("🚀 自動提取網頁 Prompt & 圖文 (Gemini 免費版)")
 
-# 爬蟲函數
+# === 3. 爬蟲函數 ===
 def fetch_website_content(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 抓取文字 (限制長度避免 OpenAI token 爆掉)
-        text = soup.get_text(separator='\n', strip=True)[:3000] 
+        text = soup.get_text(separator='\n', strip=True)[:4000] 
         return text
     except Exception as e:
         return f"爬取失敗: {e}"
 
-# OpenAI 提取函數 (修復了 KeyError 報錯)
+# === 4. 改寫為 Gemini 的 AI 提取函數 ===
 def ai_extract(text):
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "你是一個 AI 助手。請從以下文章中提取出所有提到的 AI 繪圖 Prompt (提示詞)，並幫它們進行分類。"},
-                {"role": "user", "content": f"請分析以下文章：\n\n{text}"}
-            ]
-        )
-        # 這是新版 OpenAI 套件的正確寫法
-        return response.choices[0].message.content
+        prompt = f"你是一個 AI 助手。請從以下文章中提取出所有提到的 AI 繪圖 Prompt (提示詞)，並幫它們進行分類。\n\n文章內容：\n{text}"
+        response = model.generate_content(prompt)
+        return response.text
     except Exception as e:
         return f"AI 處理失敗: {e}"
 
-# ================= 之前的 OpenAI 和 爬蟲函數保留不變 =================
-# ... (上面的程式碼保留) ...
-
-# ================= 新的 UI 介面 (雙模式) =================
+# === 5. UI 介面 (雙模式) ===
 st.write("---")
-# 使用分頁功能，讓你可以選擇「貼網址」或「貼文字」
 tab1, tab2 = st.tabs(["🔗 貼上網址自動抓", "📝 直接貼上文章 (推薦)"])
 
 with tab1:
@@ -69,7 +52,7 @@ with tab1:
                 
             if "爬取失敗" in web_text:
                 st.error("❌ 網站防火牆阻擋了抓取，請改用「📝 直接貼上文章」模式。")
-                st.code(web_text) # 顯示錯誤原因
+                st.code(web_text)
             else:
                 with st.spinner("🤖 AI 正在努力分析並分類 Prompt..."):
                     ai_result = ai_extract(web_text)
@@ -84,7 +67,6 @@ with tab2:
             st.warning("請先貼上文章內容！")
         else:
             with st.spinner("🤖 AI 正在努力分析並分類 Prompt..."):
-                # 直接把貼上的文字丟給 AI
                 ai_result = ai_extract(text_input) 
             st.success("✅ 提取成功！")
             st.markdown("### 📋 AI 提取與分類結果：")
