@@ -10,7 +10,7 @@ NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "")
 
 # === 2. 初始化 Gemini 模型 ===
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
 st.set_page_config(page_title="AI Prompt 提取神器", page_icon="🚀")
 st.title("🚀 自動提取網頁 Prompt & 圖文 (Gemini 免費版)")
