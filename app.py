@@ -5,10 +5,10 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import json
 
-# === 1. 從密碼本讀取金鑰 ===
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-NOTION_API_KEY = st.secrets.get("NOTION_API_KEY", "")
-NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "")
+# === 1. 從密碼本讀取金鑰 (加上 strip() 殺死所有隱形空白) ===
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
+NOTION_API_KEY = st.secrets.get("NOTION_API_KEY", "").strip()
+NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "").strip()
 
 # === 2. 初始化 Gemini 模型 ===
 genai.configure(api_key=GEMINI_API_KEY)
@@ -53,7 +53,8 @@ def ai_extract_to_json(text):
     try:
         response = model.generate_content(prompt)
         result_text = response.text.strip()
-        if result_text.startswith("```json"): result_text = result_text[7:]
+        if result_text.startswith("
+```json"): result_text = result_text[7:]
         if result_text.startswith("```"): result_text = result_text[3:]
         if result_text.endswith("```"): result_text = result_text[:-3]
         return json.loads(result_text.strip())
@@ -64,16 +65,13 @@ def save_to_notion(prompt_text, category, description):
     if not NOTION_API_KEY or not NOTION_DB_ID:
         return False, "Notion 金鑰未設定！"
         
-    # 🚨 這是 Notion API 專屬通道，絕對不可以改成你自己的 Notion 網址！
-    api_url = "[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)" 
-    
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28"
     }
     data = {
-        "parent": {"database_id": NOTION_DB_ID.strip()},
+        "parent": {"database_id": NOTION_DB_ID},
         "properties": {
             "Name": {"title": [{"text": {"content": prompt_text[:1500]}}]},
             "Category": {"rich_text": [{"text": {"content": str(category)[:500]}}]},
@@ -82,7 +80,9 @@ def save_to_notion(prompt_text, category, description):
     }
     
     try:
-        response = requests.post(api_url, headers=headers, json=data)
+        # 🚨 這裡直接把網址寫死在 post 裡面，絕對不可能再出錯！
+        response = requests.post("[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)", headers=headers, json=data)
+        
         if response.status_code == 200:
             return True, "✅ 成功寫入 Notion！"
         else:
@@ -132,13 +132,18 @@ if st.session_state.extracted_data is not None:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 🚨 圖片終極修正：只拿 Prompt 的前 100 個字元畫圖，確保不會出現亂碼或過長
-                    safe_prompt = urllib.parse.quote(prompt_text[:100])
+                    # 🚨 圖片防彈機制：改用超簡短、超安全的安全詞，並加上失敗替換圖 (Placeholder)
+                    safe_prompt = urllib.parse.quote(f"A high quality illustration of {cat}")
                     image_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){safe_prompt}?width=400&height=400&nologo=true"
+                    fallback_img = "[https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed](https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed)"
                     
-                    html_img = f'<img src="{image_url}" style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
+                    html_img = f'''
+                    <img src="{image_url}" 
+                         style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" 
+                         onerror="this.onerror=null; this.src='{fallback_img}';">
+                    '''
                     st.markdown(html_img, unsafe_allow_html=True)
-                    st.caption("AI 自動預覽圖")
+                    st.caption("AI 自動預覽圖 (基於分類)")
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
