@@ -2,13 +2,16 @@ import streamlit as st
 from openai import OpenAI
 import requests
 from bs4 import BeautifulSoup
-import json
 
-# 1. 為了讓你最快成功，我們直接把 Key 寫在這裡（請替換成你「重新生成」的新 Key）
-# 注意：正式上線時不建議這樣寫，但為了讓你先成功跑出第一步，這樣最快！
-OPENAI_API_KEY = "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".strip()
-NOTION_API_KEY = "ntn_l1779333031e4T1lw1VWFhpHp0KJLbsGJu1AeQYcGOkd0c".strip()
-NOTION_DB_ID = "9f706a0e77a783beacfa011cfaaca68f".strip()
+# === 改成這樣！從 st.secrets 讀取，不再把 Key 寫死在這裡 ===
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+NOTION_API_KEY = st.secrets["NOTION_API_KEY"]
+NOTION_DB_ID = st.secrets["NOTION_DB_ID"]
+
+# 初始化 OpenAI
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# ... (下面的程式碼完全不用動) ...
 
 # 初始化 OpenAI (解決 choices 報錯的問題)
 client = OpenAI(api_key=OPENAI_API_KEY)
