@@ -6,7 +6,7 @@ import json
 
 # 1. 為了讓你最快成功，我們直接把 Key 寫在這裡（請替換成你「重新生成」的新 Key）
 # 注意：正式上線時不建議這樣寫，但為了讓你先成功跑出第一步，這樣最快！
-OPENAI_API_KEY = "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".strip()
+OPENAI_API_KEY = "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".strip()
 NOTION_API_KEY = "ntn_l1779333031e4T1lw1VWFhpHp0KJLbsGJu1AeQYcGOkd0c".strip()
 NOTION_DB_ID = "9f706a0e77a783beacfa011cfaaca68f".strip()
 
