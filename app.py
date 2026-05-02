@@ -65,7 +65,7 @@ def save_to_notion(prompt_text, category, description):
         return False, "Notion 金鑰未設定！"
         
     # 🚨 修正關鍵：確保這裡只有純文字網址，沒有任何括號！
-    url = "[https://www.notion.so/AI-prompt-extractor-9f706a0e77a783beacfa011cfaaca68f](https://www.notion.so/AI-prompt-extractor-9f706a0e77a783beacfa011cfaaca68f)" 
+    url = "[https://ripple-tortellini-dab.notion.site/AI-prompt-extractor-9f706a0e77a783beacfa011cfaaca68f](https://ripple-tortellini-dab.notion.site/AI-prompt-extractor-9f706a0e77a783beacfa011cfaaca68f)" 
     
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
