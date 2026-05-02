@@ -20,8 +20,7 @@ st.set_page_config(page_title="AI Prompt 提取神器", page_icon="🚀", layout
 st.title("🚀 AI Prompt 提取與預覽神器 (卡片版)")
 st.caption("支援自動分類、免費圖片預覽、一鍵寫入 Notion")
 
-# === 🔑 核心修復：加入 Session State (記憶體) ===
-# 讓 Streamlit 記住 AI 提取的結果，按下按鈕才不會消失
+# === 記憶體設置 ===
 if "extracted_data" not in st.session_state:
     st.session_state.extracted_data = None
 
@@ -65,25 +64,31 @@ def save_to_notion(prompt_text, category, description):
     if not NOTION_API_KEY or not NOTION_DB_ID:
         return False, "Notion 金鑰未設定！"
         
-    url = "[https://api.api.notion.com/v1/pages](https://api.api.notion.com/v1/pages)" # 修正 Notion API 網址
+    # 🚨 修正關鍵：確保這裡只有純文字網址，沒有任何括號！
+    url = "[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)" 
+    
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28"
     }
     data = {
-        "parent": {"database_id": NOTION_DB_ID},
+        "parent": {"database_id": NOTION_DB_ID.strip()},
         "properties": {
-            "Name": {"title": [{"text": {"content": prompt_text[:1500]}}]}, # 避免字數超過 Notion 限制
+            "Name": {"title": [{"text": {"content": prompt_text[:1500]}}]},
             "Category": {"rich_text": [{"text": {"content": str(category)[:500]}}]},
             "Description": {"rich_text": [{"text": {"content": str(description)[:500]}}]}
         }
     }
-    response = requests.post("[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)", headers=headers, json=data)
-    if response.status_code == 200:
-        return True, "✅ 成功寫入 Notion！"
-    else:
-        return False, f"❌ 寫入失敗: {response.text}"
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            return True, "✅ 成功寫入 Notion！"
+        else:
+            return False, f"❌ 寫入失敗 (代碼 {response.status_code}): {response.text}"
+    except Exception as e:
+        return False, f"❌ 網路連線錯誤: {e}"
 
 # === 4. UI 介面與顯示邏輯 ===
 st.write("---")
@@ -94,7 +99,6 @@ with tab1:
     if st.button("⚡ 從文字提取"):
         if text_input:
             with st.spinner("🤖 AI 正在抽取並生成 JSON 卡片資料..."):
-                # 把抽出來的資料存進記憶體
                 st.session_state.extracted_data = ai_extract_to_json(text_input)
 
 with tab2:
@@ -107,10 +111,9 @@ with tab2:
                     st.error(web_text)
                 else:
                     with st.spinner("🤖 AI 正在抽取並生成 JSON 卡片資料..."):
-                        # 把抽出來的資料存進記憶體
                         st.session_state.extracted_data = ai_extract_to_json(web_text)
 
-# === 5. 渲染卡片 (從記憶體中讀取資料) ===
+# === 5. 渲染卡片 ===
 if st.session_state.extracted_data is not None:
     prompt_data_list = st.session_state.extracted_data
     
@@ -129,12 +132,16 @@ if st.session_state.extracted_data is not None:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 🔑 圖片修復：只拿 Prompt 的前 300 個字去畫圖，避免網址過長破圖
-                    short_prompt = prompt_text[:300] if prompt_text else "AI generated image"
-                    safe_prompt = urllib.parse.quote(short_prompt)
+                    # 🚨 圖片修正關鍵：極度縮短轉碼長度
+                    # 把分類名稱和一點點提示詞結合，避免產生過長的無效網址
+                    image_base_prompt = f"Illustration of {cat}, {prompt_text[:20]}"
+                    safe_prompt = urllib.parse.quote(image_base_prompt)
                     image_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){safe_prompt}?width=400&height=400&nologo=true"
-                    st.markdown(f'<img src="{image_url}" width="100%" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">', unsafe_allow_html=True)
-                    st.caption("AI 自動預覽圖 (基於部分 Prompt)")
+                    
+                    # 使用 HTML 顯示，並加上 onerror，如果圖片抓不到就不顯示破圖圖示
+                    html_img = f'<img src="{image_url}" style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" onerror="this.style.display=\'none\'">'
+                    st.markdown(html_img, unsafe_allow_html=True)
+                    st.caption("AI 自動預覽圖")
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
@@ -142,12 +149,10 @@ if st.session_state.extracted_data is not None:
                     st.code(prompt_text, language="text")
                     st.markdown(f"**💡 說明：** {desc}")
                     
-                    # 儲存到 Notion 的按鈕
                     if st.button(f"💾 儲存這組到 Notion", key=f"btn_notion_{i}"):
                         with st.spinner("寫入中..."):
                             success, msg = save_to_notion(prompt_text, cat, desc)
                             if success:
-                                st.toast(msg, icon="✅")
-                                st.success("已成功存入資料庫！")
+                                st.success("🎉 " + msg)
                             else:
                                 st.error(msg)
