@@ -1,92 +1,76 @@
-import os, requests, base64, json
-import pandas as pd
 import streamlit as st
+import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from dotenv import load_dotenv
+import pandas as pd
 
-load_dotenv()
-
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-NOTION_KEY = os.getenv("NOTION_API_KEY")
-NOTION_DB = os.getenv("NOTION_DB_ID")
+# ====== SAFE SECRETS ======
+OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
+NOTION_KEY = st.secrets["NOTION_API_KEY"]
+NOTION_DB = st.secrets["NOTION_DB_ID"]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
+# ====== SCRAPE ======
 def scrape(url):
     html = requests.get(url, headers=HEADERS).text
     soup = BeautifulSoup(html, "html.parser")
 
-    texts = [p.get_text(strip=True) for p in soup.find_all("p")]
-    full_text = "\n".join(texts)
+    text = " ".join([p.get_text() for p in soup.find_all("p")])
 
-    imgs = []
+    images = []
     for img in soup.find_all("img"):
-        src = img.get("src")
-        if src:
-            imgs.append(urljoin(url, src))
+        if img.get("src"):
+            images.append(urljoin(url, img["src"]))
 
-    return full_text, list(set(imgs))[:5]
+    return text, images[:5]
 
+# ====== OPENAI ======
 def ai_extract(text):
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = f"抽出AI圖片prompt，輸出JSON list：{text[:3000]}"
-
-    data = {
-        "model": "gpt-4.1",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
-    res = requests.post(url, headers=headers, json=data).json()
-    return res["choices"][0]["message"]["content"]
-
-def push_notion(prompt, url_src):
-    url = "https://api.notion.com/v1/pages"
-    headers = {
-        "Authorization": f"Bearer {NOTION_KEY}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "parent": {"database_id": NOTION_DB},
-        "properties": {
-            "Title": {"title": [{"text": {"content": "AI Prompt"}}]},
-            "Prompt": {"rich_text": [{"text": {"content": prompt[:2000]}}]},
-            "Source URL": {"url": url_src}
+    r = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENAI_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "user", "content": f"Extract AI prompts:\n{text[:2000]}"}
+            ]
         }
-    }
+    )
 
-    requests.post(url, headers=headers, json=data)
+    # 🔥 debug safe
+    if r.status_code != 200:
+        return f"ERROR: {r.text}"
 
-st.title("AI Prompt Extractor")
+    return r.json()["choices"][0]["message"]["content"]
 
-url = st.text_input("輸入網址")
+# ====== UI ======
+st.title("🧠 AI Prompt Extractor")
+
+url = st.text_input("Input URL")
 
 if st.button("Run"):
+    if not url:
+        st.error("請輸入網址")
+        st.stop()
+
     text, images = scrape(url)
 
-    st.write("圖片：")
+    st.subheader("Images")
     for img in images:
         st.image(img)
 
+    st.subheader("Result")
     result = ai_extract(text)
-
-    st.write("Prompt：")
     st.code(result)
 
-    try:
-        prompts = json.loads(result)
-    except:
-        prompts = [result]
+    df = pd.DataFrame({"result": [result]})
 
-    for p in prompts:
-        push_notion(str(p), url)
-
-    df = pd.DataFrame({"prompt": prompts})
-    st.download_button("Download CSV", df.to_csv(index=False), "result.csv")
+    st.download_button(
+        "Download CSV",
+        df.to_csv(index=False),
+        "result.csv"
+    )
