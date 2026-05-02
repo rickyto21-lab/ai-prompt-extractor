@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import json
 
-# === 1. 從密碼本讀取金鑰 (加上 strip() 殺死所有隱形空白) ===
+# === 1. 從密碼本讀取金鑰 ===
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
 NOTION_API_KEY = st.secrets.get("NOTION_API_KEY", "").strip()
 NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "").strip()
@@ -53,10 +53,11 @@ def ai_extract_to_json(text):
     try:
         response = model.generate_content(prompt)
         result_text = response.text.strip()
-        if result_text.startswith("
-```json"): result_text = result_text[7:]
-        if result_text.startswith("```"): result_text = result_text[3:]
-        if result_text.endswith("```"): result_text = result_text[:-3]
+        
+        # 🚨 防呆修正：使用最安全的 replace 替換法，絕對不會再發生引號斷掉的 Syntax Error！
+        result_text = result_text.replace("```json", "")
+        result_text = result_text.replace("```", "")
+        
         return json.loads(result_text.strip())
     except Exception as e:
         return None
@@ -80,8 +81,7 @@ def save_to_notion(prompt_text, category, description):
     }
     
     try:
-        # 🚨 這裡直接把網址寫死在 post 裡面，絕對不可能再出錯！
-        response = requests.post("[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)", headers=headers, json=data)
+        response = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
         
         if response.status_code == 200:
             return True, "✅ 成功寫入 Notion！"
@@ -132,10 +132,9 @@ if st.session_state.extracted_data is not None:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 🚨 圖片防彈機制：改用超簡短、超安全的安全詞，並加上失敗替換圖 (Placeholder)
                     safe_prompt = urllib.parse.quote(f"A high quality illustration of {cat}")
-                    image_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){safe_prompt}?width=400&height=400&nologo=true"
-                    fallback_img = "[https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed](https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed)"
+                    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
+                    fallback_img = "https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed"
                     
                     html_img = f'''
                     <img src="{image_url}" 
