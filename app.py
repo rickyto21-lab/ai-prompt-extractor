@@ -6,9 +6,9 @@ import json
 
 # 1. 為了讓你最快成功，我們直接把 Key 寫在這裡（請替換成你「重新生成」的新 Key）
 # 注意：正式上線時不建議這樣寫，但為了讓你先成功跑出第一步，這樣最快！
-OPENAI_API_KEY = "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"
-NOTION_API_KEY = "ntn_l1779333031e4T1lw1VWFhpHp0KJLbsGJu1AeQYcGOkd0c"
-NOTION_DB_ID = "9f706a0e77a783beacfa011cfaaca68f"
+OPENAI_API_KEY = "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".strip()
+NOTION_API_KEY = "ntn_l1779333031e4T1lw1VWFhpHp0KJLbsGJu1AeQYcGOkd0c".strip()
+NOTION_DB_ID = "9f706a0e77a783beacfa011cfaaca68f".strip()
 
 # 初始化 OpenAI (解決 choices 報錯的問題)
 client = OpenAI(api_key=OPENAI_API_KEY)
