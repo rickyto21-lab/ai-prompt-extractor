@@ -132,7 +132,8 @@ if st.session_state.extracted_data is not None:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    safe_prompt = urllib.parse.quote(f"A high quality illustration of {cat}")
+                    # 🚨 圖片終極防彈機制：畫圖 API 看不懂中文，我們改用純英文通用詞彙！
+                    safe_prompt = urllib.parse.quote("high quality 3d toy figure concept art")
                     image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
                     fallback_img = "https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed"
                     
