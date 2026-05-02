@@ -129,10 +129,13 @@ if text_to_process:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 使用 Pollinations 免費 API 自動生成圖片 (將 prompt 編碼成網址)
+                    # 使用 Pollinations 免費 API 自動生成圖片
                     safe_prompt = urllib.parse.quote(prompt_text)
-                    image_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){safe_prompt}?width=400&height=400&nologo=true"
-                    st.image(image_url, caption="AI 自動預覽圖", use_container_width=True)
+                    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
+                    
+                    # 改用 HTML 渲染，讓圖片在前端載入，避免 Streamlit 伺服器超時當機
+                    st.markdown(f'<img src="{image_url}" width="100%" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">', unsafe_allow_html=True)
+                    st.caption("AI 自動預覽圖")
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
