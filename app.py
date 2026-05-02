@@ -64,8 +64,8 @@ def save_to_notion(prompt_text, category, description):
     if not NOTION_API_KEY or not NOTION_DB_ID:
         return False, "Notion 金鑰未設定！"
         
-    # 🚨 修正關鍵：確保這裡只有純文字網址，沒有任何括號！
-    url = "[https://ripple-tortellini-dab.notion.site/AI-prompt-extractor-9f706a0e77a783beacfa011cfaaca68f](https://ripple-tortellini-dab.notion.site/AI-prompt-extractor-9f706a0e77a783beacfa011cfaaca68f)" 
+    # 🚨 這是 Notion API 專屬通道，絕對不可以改成你自己的 Notion 網址！
+    api_url = "[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)" 
     
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -82,7 +82,7 @@ def save_to_notion(prompt_text, category, description):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(api_url, headers=headers, json=data)
         if response.status_code == 200:
             return True, "✅ 成功寫入 Notion！"
         else:
@@ -132,14 +132,11 @@ if st.session_state.extracted_data is not None:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 🚨 圖片修正關鍵：極度縮短轉碼長度
-                    # 把分類名稱和一點點提示詞結合，避免產生過長的無效網址
-                    image_base_prompt = f"Illustration of {cat}, {prompt_text[:20]}"
-                    safe_prompt = urllib.parse.quote(image_base_prompt)
+                    # 🚨 圖片終極修正：只拿 Prompt 的前 100 個字元畫圖，確保不會出現亂碼或過長
+                    safe_prompt = urllib.parse.quote(prompt_text[:100])
                     image_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){safe_prompt}?width=400&height=400&nologo=true"
                     
-                    # 使用 HTML 顯示，並加上 onerror，如果圖片抓不到就不顯示破圖圖示
-                    html_img = f'<img src="{image_url}" style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" onerror="this.style.display=\'none\'">'
+                    html_img = f'<img src="{image_url}" style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
                     st.markdown(html_img, unsafe_allow_html=True)
                     st.caption("AI 自動預覽圖")
                 
