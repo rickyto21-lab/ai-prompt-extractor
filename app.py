@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import json
 import re
-import random
 
 # === 1. 從密碼本讀取金鑰 ===
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
@@ -38,7 +37,7 @@ def fetch_website_content(url):
         return f"爬取失敗: {e}"
 
 def ai_extract_to_json(text):
-    # 🌟 終極優化：嚴格限制 preview_prompt 只能有 3 個單字，徹底解決 API 破圖問題
+    # 🌟 終極防破圖指令：嚴格禁止敏感詞彙，確保 100% 通過繪圖 API 的安全審查
     prompt = f"""
     你是一個 AI 助手。請從以下文章中提取出所有提到的 AI 繪圖 Prompt (提示詞)，並進行分類。
     請務必以 JSON 陣列 (Array) 的格式輸出，不要包含任何其他多餘的文字。
@@ -48,11 +47,13 @@ def ai_extract_to_json(text):
         "category": "風景",
         "prompt": "a beautiful mountain, sunset, 8k resolution",
         "description": "用於生成高畫質的日落風景圖",
-        "preview_prompt": "beautiful mountain sunset" 
+        "preview_prompt": "mountain sunset" 
       }}
     ]
     
-    注意："preview_prompt" 必須是純英文，且「最多只能有 3 個單字」(例如: cute cat, cyberpunk city)。絕對不要包含任何數字、比例 (如 1/7)、標點符號或複雜描述，只要最核心的名詞即可！
+    注意："preview_prompt" 必須是純英文，且「最多只能有 2 個單字」(例如: cute cat, modern building)。
+    絕對不要包含任何數字、比例、標點符號。
+    【極度重要】：絕對不要包含任何人物關係詞彙(如 lovers, couple)、暴力或敏感詞彙，僅保留最基礎的「無生命名詞」或「單一動物/職業」(如 desk, building, dog, warrior)，否則系統會崩潰！
     
     文章內容：
     {text}
@@ -88,7 +89,6 @@ def save_to_notion(prompt_text, category, description, image_url):
     data = {
         "parent": {"database_id": NOTION_DB_ID},
         "icon": {"type": "emoji", "emoji": "🎨"},
-        # 🌟 這裡已經自動把圖片設為 Notion 的「封面」了！
         "cover": {
             "type": "external",
             "external": {"url": image_url}
@@ -182,7 +182,7 @@ if st.session_state.extracted_data is not None:
             desc = item.get("description", "無")
             preview_prompt = item.get("preview_prompt", "beautiful art")
             
-            # 🌟 終極防破圖：只保留純英文字母，過濾掉所有數字和符號
+            # 只保留純英文字母，過濾掉所有數字和符號
             clean_preview = re.sub(r'[^a-zA-Z\s]', '', preview_prompt)
             clean_preview = ' '.join(clean_preview.split())[:30] 
             if not clean_preview:
@@ -190,22 +190,16 @@ if st.session_state.extracted_data is not None:
                 
             safe_prompt = urllib.parse.quote(clean_preview)
             
-            # 🌟 加上 .png 讓 Notion 更容易識別這是一張圖
-            image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}.png?width=400&height=400&nologo=true&seed={random.randint(1, 10000)}"
+            # 🌟 修復閃爍問題：將 random 改為固定的 seed (基於卡片索引 i)，這樣點擊按鈕時圖片就不會變了！
+            fixed_seed = 42 + i 
+            image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}.png?width=400&height=400&nologo=true&seed={fixed_seed}"
             
             with st.container(border=True):
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 🌟 改回 HTML 渲染，並加入 onerror 備用圖機制。如果 API 真的掛了，會顯示灰色佔位圖，不會破圖！
-                    fallback_img = "https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed"
-                    html_img = f'''
-                    <img src="{image_url}" 
-                         style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" 
-                         onerror="this.onerror=null; this.src='{fallback_img}';">
-                    '''
-                    st.markdown(html_img, unsafe_allow_html=True)
-                    st.caption(f"AI 預覽圖 ({clean_preview})")
+                    # 🌟 改回 Streamlit 原生圖片元件，顯示最穩定
+                    st.image(image_url, caption=f"AI 預覽圖 ({clean_preview})", use_container_width=True)
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
