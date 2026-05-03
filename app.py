@@ -5,6 +5,8 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import json
 import re
+from PIL import Image          # 新增: 處理影像核心查核
+import io                      # 新增: 用來轉換網路快取的串流格式
 
 # === 1. 從密碼本讀取金鑰 ===
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
@@ -18,8 +20,8 @@ target_model_name = next((name for name in available_models if "flash" in name),
 model = genai.GenerativeModel(target_model_name)
 
 st.set_page_config(page_title="AI Prompt 提取神器", page_icon="🚀", layout="wide")
-st.title("🚀 AI Prompt 提取與預覽神器 (穩如泰山版)")
-st.caption("支援自動分類、零破圖預覽圖、一鍵完美寫入精美 Notion 頁面")
+st.title("🚀 AI Prompt 提取與預覽神器 (極致護航版)")
+st.caption("支援自動分類、全天候抗異常出圖預覽、完美寫入精美 Notion 頁面")
 
 # === 記憶體設置 ===
 if "extracted_data" not in st.session_state:
@@ -50,7 +52,7 @@ def ai_extract_to_json(text):
       }}
     ]
     
-    【嚴重警告】："preview_prompt" 用來傳給畫圖API。請嚴格使用不超過2個基礎英文字彙描述重點（例如 "robot"、"building"、"apple"）。禁止出現人類情緒/兩性互動 (如lovers、kiss、hate) 與其他血腥暴力相關用字以策安全。不可含數字。
+    【嚴重警告】："preview_prompt" 用來傳給畫圖API。請嚴格使用不超過2個基礎英文字彙描述重點（例如 "robot"、"building"、"apple"）。禁止出現人類情緒/兩性互動與其他血腥暴力相關用字。不可含數字與任何符號。
     
     文章內容：
     {text}
@@ -70,10 +72,9 @@ def ai_extract_to_json(text):
         st.error(f"JSON 解析失敗: {e}")
         return None
 
-# 🌟 徹底阻絕破圖：Python 端抓取與錯誤攔截防護盾（加上 Cache 防止點擊亂跳重讀）
+# 🌟 極致除錯機制：加強影像核心的查驗防守（Image 海關）
 @st.cache_data(show_spinner=False, ttl=3600)
 def get_stable_image(preview_keyword, seed):
-    # 對單字去特殊符號
     clean_keyword = re.sub(r'[^a-zA-Z\s]', '', preview_keyword).strip()
     safe_keyword = urllib.parse.quote(clean_keyword)
     
@@ -81,19 +82,19 @@ def get_stable_image(preview_keyword, seed):
          safe_keyword = "scenery"
             
     api_url = f"https://image.pollinations.ai/prompt/{safe_keyword}.png?width=400&height=400&nologo=true&seed={seed}"
-    # 公開圖庫的靜態圖，絕對不可能死連，充當我們的 Fallback
-    fallback_url = "https://placehold.co/400x400/eeeeee/888888?text=API+Timeout"
+    # ✅ 強制結尾使用 `.png`（防止原本 placehold 的 SVG 造句格式觸發 PIL 解析崩潰）
+    fallback_url = "https://placehold.co/400x400/eeeeee/888888.png?text=Preview+Disabled"
     
     try:
-        # 要求 Python 試著拿到圖 (強制 AI 後台產生圖不偷懶)
         r = requests.get(api_url, timeout=12)
-        if r.status_code == 200:
-            return r.content, api_url # 成功 -> 回傳位元檔案及這串安全的網址給 Notion
-        else:
-            fb = requests.get(fallback_url, timeout=5)
-            return fb.content, fallback_url
-    except requests.exceptions.RequestException:
-        # 一有連線錯與 Timeout 立馬強塞後補灰圖，杜絕所有網頁小圖示破損！
+        r.raise_for_status() 
+
+        # ✅ 極端守門員：強迫解析檢查，即使收到代碼 200 的異常格式假圖片(HTML)也能一秒篩掉。
+        Image.open(io.BytesIO(r.content)).verify() 
+        return r.content, api_url
+
+    except Exception:
+        # 如果任何連線出包、或抓出破爛的無效檔案，乖乖塞回我們的真・備用純影像！
         fb = requests.get(fallback_url, timeout=5)
         return fb.content, fallback_url
 
@@ -114,7 +115,7 @@ def save_to_notion(prompt_text, category, description, final_img_url):
         "icon": {"type": "emoji", "emoji": "🎨"},
         "cover": {
             "type": "external",
-            "external": {"url": final_img_url} # 送出確保可以運作無虞的完美 url
+            "external": {"url": final_img_url}
         },
         "properties": {
             "Name": {"title":[{"text": {"content": short_title}}]},
@@ -204,19 +205,18 @@ if st.session_state.extracted_data is not None:
             prompt_text = item.get("prompt", "")
             desc = item.get("description", "無")
             preview_prompt = item.get("preview_prompt", "figure")
-            fixed_seed = 1000 + i # 使用每張卡固定的種子杜絕亂數轉換閃圖 
+            fixed_seed = 1000 + i 
             
             with st.container(border=True):
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    with st.spinner("等待雲端 AI 動態運算生成此預覽圖，不會壞請放心..."):
-                        # 直接等待這條由後端包裝的緩衝結果出來！無懼任何Timeout及破損！
+                    with st.spinner("等待雲端 AI 建立卡片專屬附圖中..."):
+                        # 利用 Python 開出絕對安全的底片防撞網
                         img_bytes, safe_url_to_notion = get_stable_image(preview_prompt, fixed_seed)
                         
                         if img_bytes:
-                            # 放手給系統原生的圖元模塊接棒去安放這包確實存在的圖資源。
-                            st.image(img_bytes, caption=f"自動產生配圖({preview_prompt[:20]})", use_container_width=True)
+                            st.image(img_bytes, caption=f"自動產生配圖 ({preview_prompt[:20]})", use_container_width=True)
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
