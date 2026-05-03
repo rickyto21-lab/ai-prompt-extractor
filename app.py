@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 import json
+import re  # 新增正則表達式庫，用來精準抓取 JSON
 
 # === 1. 從密碼本讀取金鑰 ===
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
@@ -12,7 +13,7 @@ NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "").strip()
 
 # === 2. 初始化 Gemini 模型 ===
 genai.configure(api_key=GEMINI_API_KEY)
-available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+available_models =[m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
 target_model_name = next((name for name in available_models if "flash" in name), available_models[0] if available_models else 'gemini-1.5-flash')
 model = genai.GenerativeModel(target_model_name)
 
@@ -27,8 +28,8 @@ if "extracted_data" not in st.session_state:
 # === 3. 核心功能函數 ===
 def fetch_website_content(url):
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         return soup.get_text(separator='\n', strip=True)[:4000] 
@@ -36,17 +37,22 @@ def fetch_website_content(url):
         return f"爬取失敗: {e}"
 
 def ai_extract_to_json(text):
+    # 💡 優化：要求 AI 額外輸出 "preview_prompt" (純英文)，專門用來畫預覽圖
     prompt = f"""
     你是一個 AI 助手。請從以下文章中提取出所有提到的 AI 繪圖 Prompt (提示詞)，並進行分類。
-    請務必以 JSON 陣列 (Array) 的格式輸出，不要包含任何其他多餘的文字或 markdown 標記。
-    格式範例：
-    [
+    請務必以 JSON 陣列 (Array) 的格式輸出，不要包含任何其他多餘的文字。
+    
+    格式範例：[
       {{
         "category": "風景",
         "prompt": "a beautiful mountain, sunset, 8k resolution",
-        "description": "用於生成高畫質的日落風景圖"
+        "description": "用於生成高畫質的日落風景圖",
+        "preview_prompt": "a beautiful mountain, sunset, 8k resolution" 
       }}
     ]
+    
+    注意："preview_prompt" 必須是純英文，且長度不超過 50 個單字，專門用來餵給繪圖 API 產生預覽圖。
+    
     文章內容：
     {text}
     """
@@ -54,12 +60,17 @@ def ai_extract_to_json(text):
         response = model.generate_content(prompt)
         result_text = response.text.strip()
         
-        # 🚨 防呆修正：使用最安全的 replace 替換法，絕對不會再發生引號斷掉的 Syntax Error！
-        result_text = result_text.replace("```json", "")
-        result_text = result_text.replace("```", "")
-        
-        return json.loads(result_text.strip())
+        # 🚨 終極防呆：使用正則表達式只抓取 [ ] 之間的 JSON 陣列內容
+        match = re.search(r'\[.*\]', result_text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            return json.loads(json_str)
+        else:
+            st.error("AI 回傳的格式找不到 JSON 陣列。")
+            return None
+            
     except Exception as e:
+        st.error(f"JSON 解析失敗: {e}")
         return None
 
 def save_to_notion(prompt_text, category, description):
@@ -71,12 +82,14 @@ def save_to_notion(prompt_text, category, description):
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28"
     }
+    
+    # ⚠️ 注意：你的 Notion Database 必須要有 "Name" (Title屬性), "Category" (Text屬性), "Description" (Text屬性) 這三個欄位
     data = {
         "parent": {"database_id": NOTION_DB_ID},
         "properties": {
             "Name": {"title": [{"text": {"content": prompt_text[:1500]}}]},
             "Category": {"rich_text": [{"text": {"content": str(category)[:500]}}]},
-            "Description": {"rich_text": [{"text": {"content": str(description)[:500]}}]}
+            "Description": {"rich_text":[{"text": {"content": str(description)[:500]}}]}
         }
     }
     
@@ -127,13 +140,15 @@ if st.session_state.extracted_data is not None:
             cat = item.get("category", "未分類")
             prompt_text = item.get("prompt", "")
             desc = item.get("description", "無")
+            # 取得 AI 專門生成的英文預覽 Prompt，如果沒有則使用預設值
+            preview_prompt = item.get("preview_prompt", "high quality 3d toy figure concept art")
             
             with st.container(border=True):
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 🚨 圖片終極防彈機制：畫圖 API 看不懂中文，我們改用純英文通用詞彙！
-                    safe_prompt = urllib.parse.quote("high quality 3d toy figure concept art")
+                    # 💡 將 AI 提取的專屬英文 Prompt 轉換為 URL 安全格式
+                    safe_prompt = urllib.parse.quote(preview_prompt)
                     image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
                     fallback_img = "https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed"
                     
@@ -143,7 +158,7 @@ if st.session_state.extracted_data is not None:
                          onerror="this.onerror=null; this.src='{fallback_img}';">
                     '''
                     st.markdown(html_img, unsafe_allow_html=True)
-                    st.caption("AI 自動預覽圖 (基於分類)")
+                    st.caption(f"AI 自動預覽圖 (基於: {preview_prompt[:20]}...)")
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
