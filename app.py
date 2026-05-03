@@ -4,61 +4,97 @@ import requests, json, re
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
-# ====== 🔐 SECRETS ======
+# ====== 🔐 KEYS ======
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+STABILITY_API_KEY = st.secrets.get("STABILITY_API_KEY", "")
 NOTION_API_KEY = st.secrets.get("NOTION_API_KEY", "")
 NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", "")
-STABILITY_API_KEY = st.secrets.get("STABILITY_API_KEY", "")
 
 # ====== INIT ======
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 st.set_page_config(page_title="AI Prompt Extractor", layout="wide")
-st.title("🧠 AI Prompt Extractor Pro")
+st.title("🧠 AI Prompt Extractor PRO (No Zero Mode)")
 
 # ====== SCRAPER ======
-def fetch_website_content(url):
+def fetch(url):
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
-        return soup.get_text()[:4000]
+        text = soup.get_text(separator="\n")
+        return text[:4000]
     except Exception as e:
-        return f"ERROR: {e}"
+        return ""
 
 # ====== AI EXTRACT ======
 def ai_extract(text):
     prompt = f"""
-    Extract AI image prompts and return JSON array:
-    [
-      {{
-        "category": "...",
-        "prompt": "...",
-        "description": "...",
-        "preview_prompt": "1-2 words"
-      }}
-    ]
-    TEXT:
-    {text}
-    """
+You MUST return at least 3 prompts.
+
+If no prompt exists, GENERATE based on topic.
+
+ONLY return JSON array:
+[
+  {{
+    "category":"...",
+    "prompt":"...",
+    "description":"...",
+    "preview_prompt":"one word"
+  }}
+]
+
+TEXT:
+{text[:3000]}
+"""
 
     try:
         res = model.generate_content(prompt)
-        match = re.search(r"\[.*\]", res.text, re.S)
-        return json.loads(match.group()) if match else []
-    except:
+        raw = res.text.strip()
+
+        st.expander("🔍 Debug AI Output").write(raw[:1000])
+
+        match = re.search(r"\[.*\]", raw, re.S)
+
+        if match:
+            return json.loads(match.group())
+        else:
+            return []
+    except Exception as e:
+        st.error(f"AI error: {e}")
         return []
 
-# ====== 🎨 AI IMAGE (Stability) ======
+# ====== FALLBACK ======
+def fallback():
+    return [
+        {
+            "category": "general",
+            "prompt": "cinematic city skyline at sunset, ultra realistic, 8k",
+            "description": "fallback generated",
+            "preview_prompt": "city"
+        },
+        {
+            "category": "architecture",
+            "prompt": "modern luxury house, sunset lighting, minimal design",
+            "description": "fallback generated",
+            "preview_prompt": "house"
+        },
+        {
+            "category": "nature",
+            "prompt": "beautiful mountain landscape, golden hour, ultra detailed",
+            "description": "fallback generated",
+            "preview_prompt": "mountain"
+        }
+    ]
+
+# ====== IMAGE ======
 def generate_image(prompt):
     if not STABILITY_API_KEY:
         return None
 
     try:
-        url = "https://api.stability.ai/v2beta/stable-image/generate/core"
-
-        response = requests.post(
-            url,
+        r = requests.post(
+            "https://api.stability.ai/v2beta/stable-image/generate/core",
             headers={
                 "Authorization": f"Bearer {STABILITY_API_KEY}",
                 "Accept": "image/*"
@@ -71,16 +107,16 @@ def generate_image(prompt):
             timeout=20
         )
 
-        if response.status_code == 200:
-            return response.content
-        else:
-            return None
+        if r.status_code == 200:
+            return r.content
     except:
-        return None
+        pass
 
-# ====== 📦 NOTION ======
-def save_to_notion(prompt, category, desc, image_url):
-    if not NOTION_API_KEY or not NOTION_DB_ID:
+    return None
+
+# ====== NOTION ======
+def save_notion(prompt, category, desc):
+    if not NOTION_API_KEY:
         return
 
     headers = {
@@ -91,7 +127,6 @@ def save_to_notion(prompt, category, desc, image_url):
 
     data = {
         "parent": {"database_id": NOTION_DB_ID},
-        "cover": {"type": "external", "external": {"url": image_url}},
         "properties": {
             "Name": {"title":[{"text":{"content": prompt[:50]}}]},
             "Category": {"rich_text":[{"text":{"content": category}}]},
@@ -113,28 +148,31 @@ def save_to_notion(prompt, category, desc, image_url):
 # ====== UI ======
 tab1, tab2 = st.tabs(["✏️ Text", "🌐 URL"])
 
-input_text = ""
+text = ""
 
 with tab1:
-    input_text = st.text_area("Paste text")
+    text = st.text_area("Paste content")
 
 with tab2:
     url = st.text_input("Enter URL")
     if url:
-        input_text = fetch_website_content(url)
+        text = fetch(url)
+        st.expander("📄 Scraped Text").write(text[:1000])
 
 # ====== RUN ======
 if st.button("🚀 Extract"):
-    if not input_text:
+    if not text:
         st.warning("No input")
         st.stop()
 
-    with st.spinner("🤖 Extracting..."):
-        data = ai_extract(input_text)
+    data = ai_extract(text)
 
-    st.success(f"{len(data)} prompts found")
+    if not data:
+        st.warning("⚠️ AI failed → using fallback")
+        data = fallback()
 
-    # ====== CARD UI ======
+    st.success(f"{len(data)} prompts ready")
+
     for i, item in enumerate(data):
         col1, col2 = st.columns([1,2])
 
@@ -143,20 +181,16 @@ if st.button("🚀 Extract"):
         desc = item.get("description","")
 
         with col1:
-            with st.spinner("🎨 Generating image..."):
+            with st.spinner("🎨 Generating..."):
                 img = generate_image(prompt)
-
                 if img:
                     st.image(img)
-                else:
-                    st.warning("No image")
 
         with col2:
-            st.subheader(f"🏷️ {cat}")
+            st.subheader(cat)
             st.code(prompt)
             st.write(desc)
 
-            if st.button("💾 Save to Notion", key=i):
-                fake_url = f"https://dummyimage.com/600x400/000/fff&text={quote(prompt[:20])}"
-                save_to_notion(prompt, cat, desc, fake_url)
-                st.success("Saved!")
+            if st.button("💾 Save", key=i):
+                save_notion(prompt, cat, desc)
+                st.success("Saved to Notion")
