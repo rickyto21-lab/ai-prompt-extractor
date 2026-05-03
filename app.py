@@ -75,42 +75,44 @@ def ai_extract_to_json(text):
 # 🌟 究極特種守護站：瀏覽器身份隱形＋最高品味的圖檔替換機制。
 @st.cache_data(show_spinner=False, ttl=3600)
 def get_stable_image(preview_keyword, seed):
+    import urllib.parse
+    import re
+    
     clean_keyword = re.sub(r'[^a-zA-Z\s]', '', preview_keyword).strip()
-    safe_keyword = urllib.parse.quote(clean_keyword)
-    
-    if not safe_keyword:
-         safe_keyword = "scenery"
-            
-    # 一號主要渠道 (加入WAF規避設計)
-    api_url = f"https://image.pollinations.ai/prompt/{safe_keyword}.png?width=400&height=400&nologo=true&seed={seed}"
-    # 二號高級候補頻道 (產生器:極端無伺服抽象風格，萬萬用萬不失敗。種子與AI prompt完美疊加產圖保證無可取代)。
-    art_fallback_url = f"https://api.dicebear.com/7.x/shapes/png?seed={safe_keyword}{seed}&backgroundColor=e2e8f0"
-    
-    # 【超級大修復處：這兩句話就是成功與失敗防堵的分野】：穿戴「Chrome身份證護盾」對抗封鎖抓蟲
-    anti_bot_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        'Referer': 'https://pollinations.ai/'
+    safe_keyword = urllib.parse.quote(clean_keyword or "scenery")
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0'
     }
-    
+
+    # 🥇 1️⃣ Unsplash（最穩）
     try:
-        # 要求增加秒數 讓雲端 AI運作更寬裕，強制披著抗攻擊瀏覽器外衣進行拿圖。
-        r = requests.get(api_url, headers=anti_bot_headers, timeout=12)
-        r.raise_for_status() 
+        url = f"https://source.unsplash.com/400x400/?{safe_keyword}"
+        r = requests.get(url, headers=headers, timeout=6)
+        if r.status_code == 200:
+            return r.content, url
+    except:
+        pass
 
-        # 第二保險防盜假圖檢驗站：有圖才有通關憑據，要是不合法將打落給超級副系統。
-        Image.open(io.BytesIO(r.content)).verify() 
-        return r.content, api_url
+    # 🥈 2️⃣ Pollinations
+    try:
+        url = f"https://image.pollinations.ai/prompt/{safe_keyword}.png?seed={seed}"
+        r = requests.get(url, headers=headers, timeout=8)
+        if r.status_code == 200:
+            return r.content, url
+    except:
+        pass
 
-    except Exception:
-        try: 
-           # 放行最優質，專屬於本組作品的特殊拼花馬賽克或積木圖片
-           stock_image = requests.get(art_fallback_url, headers=anti_bot_headers, timeout=8)
-           return stock_image.content, art_fallback_url
-        except Exception:
-             # 三度核實(極罕發情況)，這幾乎代表服務處在休眠但還是在最後提供一盞圖！
-             endgame = requests.get("https://placehold.co/400x400/eeeeee/888888.png?text=OK", headers=anti_bot_headers)
-             return endgame.content , "https://placehold.co/400x400/eeeeee/888888.png?text=OK"
+    # 🥉 3️⃣ Dicebear fallback
+    try:
+        url = f"https://api.dicebear.com/7.x/shapes/png?seed={safe_keyword}{seed}"
+        r = requests.get(url, timeout=5)
+        return r.content, url
+    except:
+        pass
+
+    # 🔚 最終 fallback
+    return None, ""
 
 def save_to_notion(prompt_text, category, description, final_img_url):
     if not NOTION_API_KEY or not NOTION_DB_ID:
