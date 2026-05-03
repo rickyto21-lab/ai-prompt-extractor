@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import json
 import re
+import random
 
 # === 1. 從密碼本讀取金鑰 ===
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
@@ -50,7 +51,7 @@ def ai_extract_to_json(text):
       }}
     ]
     
-    注意："preview_prompt" 必須是純英文，長度不超過 15 個單字，且「絕對不要」包含任何標點符號或括號，僅保留核心視覺名詞，專門用來餵給繪圖 API 產生預覽圖。
+    注意："preview_prompt" 必須是純英文，長度不超過 10 個單字，且「絕對不要」包含任何標點符號或括號，僅保留核心視覺名詞。
     
     文章內容：
     {text}
@@ -71,7 +72,6 @@ def ai_extract_to_json(text):
         st.error(f"JSON 解析失敗: {e}")
         return None
 
-# 🌟 優化：加入 image_url 參數，並大幅修改 Notion 頁面內容 (Children Blocks)
 def save_to_notion(prompt_text, category, description, image_url):
     if not NOTION_API_KEY or not NOTION_DB_ID:
         return False, "Notion 金鑰未設定！"
@@ -82,31 +82,28 @@ def save_to_notion(prompt_text, category, description, image_url):
         "Notion-Version": "2022-06-28"
     }
     
-    # 讓 Notion 標題保持簡潔 (分類 + 提示詞前30字)
     short_title = f"[{category}] {prompt_text[:30]}..." if len(prompt_text) > 30 else f"[{category}] {prompt_text}"
     
     data = {
         "parent": {"database_id": NOTION_DB_ID},
+        # 🌟 新增：自動為 Notion 頁面加上 Icon
+        "icon": {"type": "emoji", "emoji": "🎨"},
+        # 🌟 新增：自動將 AI 預覽圖設為 Notion 頁面封面 (Cover)
+        "cover": {
+            "type": "external",
+            "external": {"url": image_url}
+        },
         "properties": {
             "Name": {"title":[{"text": {"content": short_title}}]},
             "Category": {"rich_text": [{"text": {"content": str(category)[:500]}}]},
             "Description": {"rich_text":[{"text": {"content": str(description)[:500]}}]}
         },
-        # 🌟 這裡控制 Notion 點進去後的「內頁排版」
         "children":[
-            {
-                "object": "block",
-                "type": "image",
-                "image": {
-                    "type": "external",
-                    "external": {"url": image_url}
-                }
-            },
             {
                 "object": "block",
                 "type": "heading_2",
                 "heading_2": {
-                    "rich_text": [{"text": {"content": "📝 提示詞 (Prompt)"}}],
+                    "rich_text":[{"text": {"content": "📝 提示詞 (Prompt)"}}],
                     "color": "blue_background"
                 }
             },
@@ -130,7 +127,7 @@ def save_to_notion(prompt_text, category, description, image_url):
                 "object": "block",
                 "type": "callout",
                 "callout": {
-                    "rich_text": [{"text": {"content": str(description)[:2000]}}],
+                    "rich_text":[{"text": {"content": str(description)[:2000]}}],
                     "icon": {"type": "emoji", "emoji": "✨"}
                 }
             }
@@ -140,7 +137,7 @@ def save_to_notion(prompt_text, category, description, image_url):
     try:
         response = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
         if response.status_code == 200:
-            return True, "✅ 成功寫入 Notion！(包含精美內頁)"
+            return True, "✅ 成功寫入 Notion！"
         else:
             return False, f"❌ 寫入失敗 (代碼 {response.status_code}): {response.text}"
     except Exception as e:
@@ -183,29 +180,25 @@ if st.session_state.extracted_data is not None:
             cat = item.get("category", "未分類")
             prompt_text = item.get("prompt", "")
             desc = item.get("description", "無")
-            preview_prompt = item.get("preview_prompt", "high quality 3d toy figure")
+            preview_prompt = item.get("preview_prompt", "beautiful art")
             
-            # 🌟 圖片防破圖優化：強制過濾掉所有非英數字元，只保留單字和空格
-            clean_preview = re.sub(r'[^a-zA-Z0-9\s]', '', preview_prompt).strip()
-            # 如果過濾後變空白，給個預設值
+            # 🌟 終極防破圖：只保留英數字與空白，並限制長度
+            clean_preview = re.sub(r'[^a-zA-Z0-9 ]', '', preview_prompt)
+            clean_preview = ' '.join(clean_preview.split())[:80] # 移除多餘空白並限制長度
             if not clean_preview:
                 clean_preview = "beautiful art"
                 
             safe_prompt = urllib.parse.quote(clean_preview)
-            image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
+            
+            # 🌟 關鍵修復：加上 .png 結尾，並加入隨機 seed 防止快取
+            image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}.png?width=400&height=400&nologo=true&seed={random.randint(1, 10000)}"
             
             with st.container(border=True):
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    fallback_img = "https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed"
-                    html_img = f'''
-                    <img src="{image_url}" 
-                         style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" 
-                         onerror="this.onerror=null; this.src='{fallback_img}';">
-                    '''
-                    st.markdown(html_img, unsafe_allow_html=True)
-                    st.caption(f"AI 自動預覽圖 (基於: {clean_preview[:20]}...)")
+                    # 🌟 改用 Streamlit 原生圖片渲染，更穩定
+                    st.image(image_url, caption=f"AI 預覽圖 ({clean_preview[:20]}...)", use_container_width=True)
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
@@ -215,7 +208,6 @@ if st.session_state.extracted_data is not None:
                     
                     if st.button(f"💾 儲存這組到 Notion", key=f"btn_notion_{i}"):
                         with st.spinner("寫入中..."):
-                            # 🌟 將 image_url 一併傳給 Notion 儲存函數
                             success, msg = save_to_notion(prompt_text, cat, desc, image_url)
                             if success:
                                 st.success("🎉 " + msg)
