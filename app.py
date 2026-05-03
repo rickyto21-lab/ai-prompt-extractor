@@ -4,7 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 import json
-import re  # 新增正則表達式庫，用來精準抓取 JSON
+import re
 
 # === 1. 從密碼本讀取金鑰 ===
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
@@ -19,7 +19,7 @@ model = genai.GenerativeModel(target_model_name)
 
 st.set_page_config(page_title="AI Prompt 提取神器", page_icon="🚀", layout="wide")
 st.title("🚀 AI Prompt 提取與預覽神器 (卡片版)")
-st.caption("支援自動分類、免費圖片預覽、一鍵寫入 Notion")
+st.caption("支援自動分類、免費圖片預覽、一鍵寫入精美 Notion 頁面")
 
 # === 記憶體設置 ===
 if "extracted_data" not in st.session_state:
@@ -37,7 +37,6 @@ def fetch_website_content(url):
         return f"爬取失敗: {e}"
 
 def ai_extract_to_json(text):
-    # 💡 優化：要求 AI 額外輸出 "preview_prompt" (純英文)，專門用來畫預覽圖
     prompt = f"""
     你是一個 AI 助手。請從以下文章中提取出所有提到的 AI 繪圖 Prompt (提示詞)，並進行分類。
     請務必以 JSON 陣列 (Array) 的格式輸出，不要包含任何其他多餘的文字。
@@ -47,11 +46,11 @@ def ai_extract_to_json(text):
         "category": "風景",
         "prompt": "a beautiful mountain, sunset, 8k resolution",
         "description": "用於生成高畫質的日落風景圖",
-        "preview_prompt": "a beautiful mountain, sunset, 8k resolution" 
+        "preview_prompt": "beautiful mountain sunset" 
       }}
     ]
     
-    注意："preview_prompt" 必須是純英文，且長度不超過 50 個單字，專門用來餵給繪圖 API 產生預覽圖。
+    注意："preview_prompt" 必須是純英文，長度不超過 15 個單字，且「絕對不要」包含任何標點符號或括號，僅保留核心視覺名詞，專門用來餵給繪圖 API 產生預覽圖。
     
     文章內容：
     {text}
@@ -60,7 +59,6 @@ def ai_extract_to_json(text):
         response = model.generate_content(prompt)
         result_text = response.text.strip()
         
-        # 🚨 終極防呆：使用正則表達式只抓取 [ ] 之間的 JSON 陣列內容
         match = re.search(r'\[.*\]', result_text, re.DOTALL)
         if match:
             json_str = match.group(0)
@@ -73,7 +71,8 @@ def ai_extract_to_json(text):
         st.error(f"JSON 解析失敗: {e}")
         return None
 
-def save_to_notion(prompt_text, category, description):
+# 🌟 優化：加入 image_url 參數，並大幅修改 Notion 頁面內容 (Children Blocks)
+def save_to_notion(prompt_text, category, description, image_url):
     if not NOTION_API_KEY or not NOTION_DB_ID:
         return False, "Notion 金鑰未設定！"
         
@@ -83,21 +82,65 @@ def save_to_notion(prompt_text, category, description):
         "Notion-Version": "2022-06-28"
     }
     
-    # ⚠️ 注意：你的 Notion Database 必須要有 "Name" (Title屬性), "Category" (Text屬性), "Description" (Text屬性) 這三個欄位
+    # 讓 Notion 標題保持簡潔 (分類 + 提示詞前30字)
+    short_title = f"[{category}] {prompt_text[:30]}..." if len(prompt_text) > 30 else f"[{category}] {prompt_text}"
+    
     data = {
         "parent": {"database_id": NOTION_DB_ID},
         "properties": {
-            "Name": {"title": [{"text": {"content": prompt_text[:1500]}}]},
+            "Name": {"title":[{"text": {"content": short_title}}]},
             "Category": {"rich_text": [{"text": {"content": str(category)[:500]}}]},
             "Description": {"rich_text":[{"text": {"content": str(description)[:500]}}]}
-        }
+        },
+        # 🌟 這裡控制 Notion 點進去後的「內頁排版」
+        "children":[
+            {
+                "object": "block",
+                "type": "image",
+                "image": {
+                    "type": "external",
+                    "external": {"url": image_url}
+                }
+            },
+            {
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": {
+                    "rich_text": [{"text": {"content": "📝 提示詞 (Prompt)"}}],
+                    "color": "blue_background"
+                }
+            },
+            {
+                "object": "block",
+                "type": "code",
+                "code": {
+                    "rich_text":[{"text": {"content": prompt_text[:2000]}}],
+                    "language": "plain text"
+                }
+            },
+            {
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": {
+                    "rich_text":[{"text": {"content": "💡 說明 (Description)"}}],
+                    "color": "yellow_background"
+                }
+            },
+            {
+                "object": "block",
+                "type": "callout",
+                "callout": {
+                    "rich_text": [{"text": {"content": str(description)[:2000]}}],
+                    "icon": {"type": "emoji", "emoji": "✨"}
+                }
+            }
+        ]
     }
     
     try:
         response = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
-        
         if response.status_code == 200:
-            return True, "✅ 成功寫入 Notion！"
+            return True, "✅ 成功寫入 Notion！(包含精美內頁)"
         else:
             return False, f"❌ 寫入失敗 (代碼 {response.status_code}): {response.text}"
     except Exception as e:
@@ -140,25 +183,29 @@ if st.session_state.extracted_data is not None:
             cat = item.get("category", "未分類")
             prompt_text = item.get("prompt", "")
             desc = item.get("description", "無")
-            # 取得 AI 專門生成的英文預覽 Prompt，如果沒有則使用預設值
-            preview_prompt = item.get("preview_prompt", "high quality 3d toy figure concept art")
+            preview_prompt = item.get("preview_prompt", "high quality 3d toy figure")
+            
+            # 🌟 圖片防破圖優化：強制過濾掉所有非英數字元，只保留單字和空格
+            clean_preview = re.sub(r'[^a-zA-Z0-9\s]', '', preview_prompt).strip()
+            # 如果過濾後變空白，給個預設值
+            if not clean_preview:
+                clean_preview = "beautiful art"
+                
+            safe_prompt = urllib.parse.quote(clean_preview)
+            image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
             
             with st.container(border=True):
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    # 💡 將 AI 提取的專屬英文 Prompt 轉換為 URL 安全格式
-                    safe_prompt = urllib.parse.quote(preview_prompt)
-                    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=400&height=400&nologo=true"
                     fallback_img = "https://placehold.co/400x400/eeeeee/999999?text=Image+Loading+Failed"
-                    
                     html_img = f'''
                     <img src="{image_url}" 
                          style="width:100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" 
                          onerror="this.onerror=null; this.src='{fallback_img}';">
                     '''
                     st.markdown(html_img, unsafe_allow_html=True)
-                    st.caption(f"AI 自動預覽圖 (基於: {preview_prompt[:20]}...)")
+                    st.caption(f"AI 自動預覽圖 (基於: {clean_preview[:20]}...)")
                 
                 with col2:
                     st.subheader(f"🏷️ 分類：{cat}")
@@ -168,7 +215,8 @@ if st.session_state.extracted_data is not None:
                     
                     if st.button(f"💾 儲存這組到 Notion", key=f"btn_notion_{i}"):
                         with st.spinner("寫入中..."):
-                            success, msg = save_to_notion(prompt_text, cat, desc)
+                            # 🌟 將 image_url 一併傳給 Notion 儲存函數
+                            success, msg = save_to_notion(prompt_text, cat, desc, image_url)
                             if success:
                                 st.success("🎉 " + msg)
                             else:
